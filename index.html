@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blob.io</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #1a202c;
+            color: #e2e8f0;
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 1024px;
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .card {
+            background-color: #2d3748;
+            border-radius: 1rem;
+            padding: 1.5rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .input, .button {
+            width: 100%;
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+            border: 1px solid #4a5568;
+            background-color: #4a5568;
+            color: #e2e8f0;
+            transition: all 0.3s ease;
+        }
+
+        .input::placeholder {
+            color: #a0aec0;
+        }
+
+        .button {
+            cursor: pointer;
+            font-weight: bold;
+            background-color: #48bb78;
+            color: #1a202c;
+            border: none;
+        }
+        
+        .button:hover {
+            background-color: #38a169;
+        }
+        
+        .button:disabled {
+            background-color: #a0aec0;
+            cursor: not-allowed;
+        }
+
+        #game-canvas {
+            border-radius: 1rem;
+            background-color: #252d3a;
+            box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.3);
+            border: 2px solid #4a5568;
+        }
+
+        #messages {
+            background-color: #2d3748;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            border: 1px solid #4a5568;
+            text-align: center;
+            opacity: 0;
+            transition: opacity 0.5s ease;
+        }
+
+        #messages.visible {
+            opacity: 1;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 flex items-center justify-center min-h-screen">
+
+<div class="container mx-auto max-w-4xl p-4">
+
+    <!-- Auth and Lobby View -->
+    <div id="auth-view" class="flex flex-col gap-4">
+        <div class="card">
+            <h1 class="text-3xl font-bold mb-4 text-center">Willkommen bei Blob.io</h1>
+            <p class="text-center text-gray-400 mb-6">Bitte registriere dich oder logge dich ein, um zu spielen.</p>
+
+            <div id="auth-forms" class="flex flex-col gap-4">
+                <input type="text" id="username" placeholder="Benutzername" class="input">
+                <input type="email" id="email" placeholder="E-Mail" class="input">
+                <input type="password" id="password" placeholder="Passwort" class="input">
+
+                <button id="register-button" class="button">Registrieren</button>
+                <p class="text-center text-sm text-gray-400 my-2">Oder</p>
+                <button id="login-button" class="button">Einloggen</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Lobby View -->
+    <div id="lobby-view" class="hidden flex flex-col gap-4">
+        <div class="card text-center">
+            <h2 class="text-2xl font-bold mb-2">Lobby</h2>
+            <p class="text-gray-400 mb-4">Erstelle eine neue Lobby oder trete einer bei.</p>
+            <p id="user-id-display" class="text-sm text-gray-500 break-all mb-4">User ID: </p>
+            
+            <div class="flex flex-col md:flex-row gap-4">
+                <div class="w-full md:w-1/2">
+                    <button id="create-lobby-button" class="button">Lobby erstellen</button>
+                    <p id="lobby-code-display" class="text-xl font-bold text-green-400 mt-4 hidden">Code: </p>
+                </div>
+                <div class="w-full md:w-1/2 flex flex-col gap-2">
+                    <input type="text" id="lobby-code-input" placeholder="Lobby-Code eingeben" class="input text-center tracking-widest">
+                    <button id="join-lobby-button" class="button">Lobby beitreten</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Game View -->
+    <div id="game-view" class="hidden flex flex-col gap-4 items-center">
+        <div class="card w-full">
+            <h2 id="game-title" class="text-2xl font-bold mb-2 text-center">Spiel läuft...</h2>
+            <div id="messages" class="mb-4"></div>
+            <canvas id="game-canvas" class="w-full" style="height: 60vh;"></canvas>
+            <button id="leave-game-button" class="button mt-4 bg-red-500 hover:bg-red-600">Spiel verlassen</button>
+        </div>
+    </div>
+
+    <!-- Custom Modal for Messages -->
+    <div id="modal" class="fixed inset-0 bg-gray-900 bg-opacity-75 hidden items-center justify-center p-4">
+        <div class="bg-gray-800 p-6 rounded-lg shadow-lg max-w-sm w-full text-center">
+            <p id="modal-message" class="mb-4 text-white"></p>
+            <button id="modal-close-button" class="button bg-blue-500 hover:bg-blue-600">Schliessen</button>
+        </div>
+    </div>
+</div>
+
+<script type="module">
+    // Firebase Imports aus CDN für GitHub Pages
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    // App ID für Firebase (muss manuell hinzugefügt werden)
+    const appId = "blob-io-demo"; 
+    
+    // Konfiguration für dein Firebase-Projekt
+    const firebaseConfig = {
+      apiKey: "AIzaSyAqvtzWbTlwC0FmrWWaHB-IqkmgQp0lBYs",
+      authDomain: "blob-io-ef5d0.firebaseapp.com",
+      projectId: "blob-io-ef5d0",
+      storageBucket: "blob-io-ef5d0.firebasestorage.app",
+      messagingSenderId: "49350528043",
+      appId: "1:49350528043:web:8e3583cafeb2250a566e6e",
+      measurementId: "G-WNMPX12Q39"
+    };
+
+    // Firebase Initialisierung
+    let app, auth, db;
+    let userId = null;
+    let username = '';
+    let currentLobbyId = null;
+    let isGameRunning = false;
+
+    // UI-Elemente
+    const authView = document.getElementById('auth-view');
+    const lobbyView = document.getElementById('lobby-view');
+    const gameView = document.getElementById('game-view');
+    const usernameInput = document.getElementById('username');
+    const emailInput = document.getElementById('email');
+    const passwordInput = document.getElementById('password');
+    const registerButton = document.getElementById('register-button');
+    const loginButton = document.getElementById('login-button');
+    const userIdDisplay = document.getElementById('user-id-display');
+    const createLobbyButton = document.getElementById('create-lobby-button');
+    const joinLobbyButton = document.getElementById('join-lobby-button');
+    const lobbyCodeInput = document.getElementById('lobby-code-input');
+    const lobbyCodeDisplay = document.getElementById('lobby-code-display');
+    const gameCanvas = document.getElementById('game-canvas');
+    const leaveGameButton = document.getElementById('leave-game-button');
+    const messageBox = document.getElementById('messages');
+    const modal = document.getElementById('modal');
+    const modalMessage = document.getElementById('modal-message');
+    const modalCloseButton = document.getElementById('modal-close-button');
+
+    // Spiel-Variablen
+    let myBlob = { x: 0, y: 0, radius: 10, color: '#ef4444', userId: null, username: '' };
+    let otherBlobs = {};
+    let neutralBlobs = [];
+    const WORLD_SIZE = 2000;
+    const canvasContext = gameCanvas.getContext('2d');
+    let cameraX = 0, cameraY = 0;
+    
+    // Tastatur-Steuerung
+    const keys = { w: false, a: false, s: false, d: false };
+
+
+    // ==== Hilfsfunktionen ====
+
+    /**
+     * Zeigt eine Nachricht im benutzerdefinierten Modal an.
+     * @param {string} message Die anzuzeigende Nachricht.
+     */
+    function showModal(message) {
+        modalMessage.textContent = message;
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+    }
+
+    modalCloseButton.onclick = () => {
+        modal.classList.remove('flex');
+        modal.classList.add('hidden');
+    };
+
+    /**
+     * Generiert einen zufälligen 6-stelligen Code.
+     * @returns {string} Der generierte Code.
+     */
+    function generateLobbyCode() {
+        return Math.floor(100000 + Math.random() * 900000).toString();
+    }
+
+    /**
+     * Wechselt die sichtbare Ansicht.
+     * @param {string} view Die Ansicht, die angezeigt werden soll ('auth', 'lobby', 'game').
+     */
+    function switchView(view) {
+        authView.classList.add('hidden');
+        lobbyView.classList.add('hidden');
+        gameView.classList.add('hidden');
+
+        if (view === 'auth') authView.classList.remove('hidden');
+        if (view === 'lobby') lobbyView.classList.remove('hidden');
+        if (view === 'game') gameView.classList.remove('hidden');
+    }
+    
+    /**
+     * Zeigt eine temporäre Nachricht im Spiel-Interface an.
+     * @param {string} message Die anzuzeigende Nachricht.
+     */
+    function showGameMessage(message) {
+        messageBox.textContent = message;
+        messageBox.classList.add('visible');
+        setTimeout(() => {
+            messageBox.classList.remove('visible');
+        }, 3000);
+    }
+
+    // ==== Firebase und Spiel-Logik ====
+
+    /**
+     * Initialisiert Firebase und richtet den Auth-Listener ein.
+     */
+    async function setupFirebase() {
+        try {
+            app = initializeApp(firebaseConfig);
+            auth = getAuth(app);
+            db = getFirestore(app);
+            
+            onAuthStateChanged(auth, async (user) => {
+                if (user) {
+                    userId = user.uid;
+                    myBlob.userId = userId;
+                    userIdDisplay.textContent = `User ID: ${userId}`;
+                    const userDoc = await getDoc(doc(db, "artifacts", appId, "users", userId));
+                    if (userDoc.exists()) {
+                        username = userDoc.data().username;
+                    }
+                    switchView('lobby');
+                } else {
+                    userId = null;
+                    myBlob.userId = null;
+                    switchView('auth');
+                }
+            });
+
+        } catch (error) {
+            console.error("Firebase Initialisierungsfehler:", error);
+            showModal(`Firebase-Fehler: ${error.message}`);
+        }
+    }
+
+    // Registrierung und Login-Handler
+    registerButton.onclick = async () => {
+        const email = emailInput.value;
+        const password = passwordInput.value;
+        const inputUsername = usernameInput.value;
+        if (!email || !password || !inputUsername) {
+            showModal("Bitte fülle alle Felder aus.");
+            return;
+        }
+        try {
+            const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+            await setDoc(doc(db, "artifacts", appId, "users", userCredential.user.uid), { username: inputUsername });
+            username = inputUsername;
+            showModal("Registrierung erfolgreich! Du wurdest eingeloggt.");
+        } catch (error) {
+            console.error("Registrierungsfehler:", error);
+            showModal(`Registrierungsfehler: ${error.message}`);
+        }
+    };
+
+    loginButton.onclick = async () => {
+        const email = emailInput.value;
+        const password = passwordInput.value;
+        if (!email || !password) {
+            showModal("Bitte gib E-Mail und Passwort ein.");
+            return;
+        }
+        try {
+            const userCredential = await signInWithEmailAndPassword(auth, email, password);
+            const userDoc = await getDoc(doc(db, "artifacts", appId, "users", userCredential.user.uid));
+            if (userDoc.exists()) {
+                username = userDoc.data().username;
+            }
+            showModal("Login erfolgreich!");
+        } catch (error) {
+            console.error("Login-Fehler:", error);
+            showModal(`Login-Fehler: ${error.message}`);
+        }
+    };
+
+    // Lobby-Handler
+    createLobbyButton.onclick = async () => {
+        const lobbyCode = generateLobbyCode();
+        try {
+            await setDoc(doc(db, "artifacts", appId, "public/data", "lobbies", lobbyCode), {
+                hostId: userId,
+                players: {},
+                createdAt: Date.now()
+            });
+            joinLobby(lobbyCode);
+            lobbyCodeDisplay.textContent = `Code: ${lobbyCode}`;
+            lobbyCodeDisplay.classList.remove('hidden');
+        } catch (error) {
+            console.error("Lobby-Erstellungsfehler:", error);
+            showModal(`Fehler beim Erstellen der Lobby: ${error.message}`);
+        }
+    };
+
+    joinLobbyButton.onclick = () => {
+        const lobbyCode = lobbyCodeInput.value.trim();
+        if (lobbyCode.length !== 6) {
+            showModal("Der Lobby-Code muss 6 Zeichen lang sein.");
+            return;
+        }
+        joinLobby(lobbyCode);
+    };
+
+    /**
+     * Tritt einer Lobby bei und startet das Spiel, sobald genug Spieler vorhanden sind.
+     * @param {string} lobbyCode Der Code der beizutretenden Lobby.
+     */
+    async function joinLobby(lobbyCode) {
+        if (!userId) {
+            showModal("Bitte logge dich zuerst ein.");
+            return;
+        }
+        try {
+            const lobbyDocRef = doc(db, "artifacts", appId, "public/data", "lobbies", lobbyCode);
+            const lobbyDoc = await getDoc(lobbyDocRef);
+            if (!lobbyDoc.exists()) {
+                showModal("Lobby nicht gefunden. Bitte überprüfe den Code.");
+                return;
+            }
+
+            currentLobbyId = lobbyCode;
+            switchView('game');
+            
+            // Setze den initialen Spieler-Blob in die Datenbank
+            const playerDocRef = doc(db, "artifacts", appId, "public/data", "lobbies", currentLobbyId, "players", userId);
+            await setDoc(playerDocRef, {
+                x: Math.random() * WORLD_SIZE, 
+                y: Math.random() * WORLD_SIZE, 
+                radius: 10, 
+                color: '#ef4444', 
+                userId: userId, 
+                username: username
+            });
+            
+            // Listener für die Spieleranzahl
+            const playersCollectionRef = collection(db, "artifacts", appId, "public/data", "lobbies", currentLobbyId, "players");
+            onSnapshot(playersCollectionRef, (snapshot) => {
+                const playerCount = snapshot.size;
+                
+                // Aktualisiert die Blobs der anderen Spieler
+                otherBlobs = {};
+                snapshot.forEach(doc => {
+                    const player = doc.data();
+                    if (doc.id !== userId) {
+                        otherBlobs[doc.id] = player;
+                    } else {
+                        // Aktualisiert den eigenen Blob-Status, ohne die lokale Steuerung zu überschreiben
+                        myBlob.x = player.x;
+                        myBlob.y = player.y;
+                        myBlob.radius = player.radius;
+                        myBlob.username = player.username;
+                    }
+                });
+
+                if (playerCount >= 2) {
+                    if (!isGameRunning) {
+                        showGameMessage("Das Spiel startet jetzt!");
+                        startBlobGame();
+                    }
+                } else {
+                    showGameMessage(`Warten auf Spieler (${playerCount}/2)`);
+                }
+            });
+
+        } catch (error) {
+            console.error("Lobby-Beitrittsfehler:", error);
+            showModal(`Fehler beim Beitreten der Lobby: ${error.message}`);
+        }
+    }
+
+    /**
+     * Startet die Spiel-Logik und Firestore-Synchronisation.
+     */
+    async function startBlobGame() {
+        if (!currentLobbyId || !userId || isGameRunning) return;
+
+        isGameRunning = true;
+        
+        // Initialisiere neutrale Blobs nur einmal
+        if (neutralBlobs.length === 0) {
+            for (let i = 0; i < 500; i++) {
+                neutralBlobs.push({
+                    x: Math.random() * WORLD_SIZE,
+                    y: Math.random() * WORLD_SIZE,
+                    radius: 5,
+                    color: '#cbd5e0'
+                });
+            }
+        }
+        
+        // Startet den Spiel-Loop
+        window.requestAnimationFrame(gameLoop);
+    }
+
+    // Handler für das Verlassen des Spiels
+    leaveGameButton.onclick = async () => {
+        if (currentLobbyId && userId) {
+            const playerDocRef = doc(db, "artifacts", appId, "public/data", "lobbies", currentLobbyId, "players", userId);
+            await deleteDoc(playerDocRef);
+        }
+        isGameRunning = false;
+        currentLobbyId = null;
+        otherBlobs = {};
+        switchView('lobby');
+        showGameMessage("Du hast das Spiel verlassen.");
+    };
+
+    /**
+     * Haupt-Spiel-Loop, der die Spiel-Logik und das Rendering steuert.
+     */
+    function gameLoop() {
+        if (!isGameRunning) return;
+
+        // Bewegung basierend auf Tasten
+        const speed = Math.max(2, 5 - Math.log10(myBlob.radius));
+        if (keys['w']) myBlob.y -= speed;
+        if (keys['s']) myBlob.y += speed;
+        if (keys['a']) myBlob.x -= speed;
+        if (keys['d']) myBlob.x += speed;
+
+        // Kollision mit neutralen Blobs
+        neutralBlobs = neutralBlobs.filter(blob => {
+            const dist = Math.sqrt(Math.pow(myBlob.x - blob.x, 2) + Math.pow(myBlob.y - blob.y, 2));
+            if (dist < myBlob.radius) {
+                myBlob.radius = Math.sqrt(myBlob.radius * myBlob.radius + blob.radius * blob.radius);
+                // Da neutrale Blobs lokal sind, reicht es sie aus dem Array zu entfernen.
+                return false;
+            }
+            return true;
+        });
+
+        // Kollision mit anderen Spielern
+        for (const id in otherBlobs) {
+            const other = otherBlobs[id];
+            const dist = Math.sqrt(Math.pow(myBlob.x - other.x, 2) + Math.pow(myBlob.y - other.y, 2));
+            if (dist < myBlob.radius && myBlob.radius > other.radius * 1.1) {
+                // Absorbiert den anderen Spieler
+                showGameMessage(`Du hast ${other.username} absorbiert!`);
+                myBlob.radius = Math.sqrt(myBlob.radius * myBlob.radius + other.radius * other.radius);
+                // Löscht den besiegten Spieler aus der Datenbank (er wird neu spawnen)
+                deleteDoc(doc(db, "artifacts", appId, "public/data", "lobbies", currentLobbyId, "players", id));
+            }
+        }
+
+        // Kamera-Position aktualisieren
+        cameraX = myBlob.x - gameCanvas.width / 2;
+        cameraY = myBlob.y - gameCanvas.height / 2;
+
+        // Spielstatus in Firestore aktualisieren
+        const playerDocRef = doc(db, "artifacts", appId, "public/data", "lobbies", currentLobbyId, "players", userId);
+        updateDoc(playerDocRef, { x: myBlob.x, y: myBlob.y, radius: myBlob.radius, username: username });
+
+        render();
+        window.requestAnimationFrame(gameLoop);
+    }
+
+    /**
+     * Rendert alle Spiel-Elemente auf dem Canvas.
+     */
+    function render() {
+        canvasContext.clearRect(0, 0, gameCanvas.width, gameCanvas.height);
+        
+        // Canvas-Hintergrund
+        canvasContext.fillStyle = '#252d3a';
+        canvasContext.fillRect(0, 0, gameCanvas.width, gameCanvas.height);
+
+        // Neutrale Blobs rendern
+        neutralBlobs.forEach(blob => {
+            canvasContext.beginPath();
+            canvasContext.arc(blob.x - cameraX, blob.y - cameraY, blob.radius, 0, Math.PI * 2);
+            canvasContext.fillStyle = blob.color;
+            canvasContext.fill();
+            canvasContext.closePath();
+        });
+
+        // Andere Spieler rendern
+        for (const id in otherBlobs) {
+            const other = otherBlobs[id];
+            canvasContext.beginPath();
+            canvasContext.arc(other.x - cameraX, other.y - cameraY, other.radius, 0, Math.PI * 2);
+            canvasContext.fillStyle = '#6366f1';
+            canvasContext.fill();
+            canvasContext.strokeStyle = '#e2e8f0';
+            canvasContext.lineWidth = 2;
+            canvasContext.stroke();
+            canvasContext.closePath();
+
+            // Spieler-Namen rendern
+            canvasContext.fillStyle = '#e2e8f0';
+            canvasContext.font = `${Math.max(12, other.radius * 0.5)}px Inter`;
+            canvasContext.textAlign = 'center';
+            canvasContext.fillText(other.username, other.x - cameraX, other.y - cameraY - other.radius - 5);
+        }
+
+        // Eigenen Blob rendern
+        canvasContext.beginPath();
+        canvasContext.arc(myBlob.x - cameraX, myBlob.y - cameraY, myBlob.radius, 0, Math.PI * 2);
+        canvasContext.fillStyle = myBlob.color;
+        canvasContext.fill();
+        canvasContext.strokeStyle = '#e2e8f0';
+        canvasContext.lineWidth = 2;
+        canvasContext.stroke();
+        canvasContext.closePath();
+
+        // Eigenen Namen und Radius rendern
+        canvasContext.fillStyle = '#e2e8f0';
+        canvasContext.font = `${Math.max(12, myBlob.radius * 0.5)}px Inter`;
+        canvasContext.textAlign = 'center';
+        canvasContext.fillText(myBlob.username, myBlob.x - cameraX, myBlob.y - cameraY);
+    }
+
+    // ==== Event-Listener ====
+    
+    // Listener für die Tastatureingaben
+    window.addEventListener('keydown', (e) => {
+        const key = e.key.toLowerCase();
+        if (key in keys) {
+            keys[key] = true;
+        }
+    });
+
+    window.addEventListener('keyup', (e) => {
+        const key = e.key.toLowerCase();
+        if (key in keys) {
+            keys[key] = false;
+        }
+    });
+
+    window.addEventListener('resize', () => {
+        gameCanvas.width = gameCanvas.clientWidth;
+        gameCanvas.height = gameCanvas.clientHeight;
+    });
+
+    // Initialisiert das Spiel bei Seiten-Laden
+    window.onload = () => {
+        setupFirebase();
+        gameCanvas.width = gameCanvas.clientWidth;
+        gameCanvas.height = gameCanvas.clientHeight;
+    };
+
+</script>
+</body>
+</html>
